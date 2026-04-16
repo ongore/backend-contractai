@@ -28,6 +28,19 @@ export interface SignatureSet {
   recipient?: string | null; // base64 data URL
 }
 
+// ─── Signature Image Src Helper ───────────────────────────────────────────────
+
+/**
+ * Converts a signature value to a valid HTML img src.
+ * Handles: full data URLs, HTTP(S) URLs, and raw base64 strings.
+ */
+function signatureImgSrc(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith('data:') || value.startsWith('http')) return value;
+  // Raw base64 — assume PNG (SignatureCanvas always exports PNG)
+  return `data:image/png;base64,${value}`;
+}
+
 // ─── Field Accessors ─────────────────────────────────────────────────────────
 
 function getField(fields: ExtractedField[], key: string): string {
@@ -343,12 +356,15 @@ function buildContractHtml(contract: ContractData): string {
   const sections = buildSections(contract.type, fields);
   const typeLabel = contractTypeLabel(contract.type);
 
-  const sigSenderHtml = contract.mySignature
-    ? `<img src="${contract.mySignature}" alt="Signature" class="sig-image" />`
+  const senderSrc = signatureImgSrc(contract.mySignature);
+  const recipientSrc = signatureImgSrc(contract.otherPartySignature);
+
+  const sigSenderHtml = senderSrc
+    ? `<img src="${senderSrc}" alt="Signature" class="sig-image" />`
     : `<div class="sig-line"></div>`;
 
-  const sigRecipientHtml = contract.otherPartySignature
-    ? `<img src="${contract.otherPartySignature}" alt="Signature" class="sig-image" />`
+  const sigRecipientHtml = recipientSrc
+    ? `<img src="${recipientSrc}" alt="Signature" class="sig-image" />`
     : `<div class="sig-line"></div>`;
 
   return `<!DOCTYPE html>

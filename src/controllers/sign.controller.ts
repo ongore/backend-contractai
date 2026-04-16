@@ -197,9 +197,10 @@ export async function submitSignature(
       otherPartySignature: recipientSigUrl,
     });
 
+    // Use the uploaded Supabase URLs so Puppeteer can fetch them reliably
     const finalPdfBuffer = await embedSignatureInPdf(contractData, {
       sender: contract.mySignature ?? undefined,
-      recipient: signature, // Use raw base64 for PDF embedding
+      recipient: recipientSigUrl,
     });
 
     // Upload final signed PDF (overwrites the unsigned version)

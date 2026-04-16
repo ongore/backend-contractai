@@ -45,8 +45,8 @@ const signContractSchema = z.object({
 });
 
 const sendContractSchema = z.object({
-  otherPartyEmail: z.string().email('Invalid email address'),
-  otherPartyName: z.string().min(1, 'Recipient name is required'),
+  otherPartyEmail: z.string().email('Invalid email address').optional(),
+  otherPartyName: z.string().optional(),
   expiresInDays: z.number().int().min(1).max(30).optional().default(7),
 });
 
@@ -321,8 +321,10 @@ export async function saveSignature(
       mySignature: signatureUrl,
     });
 
+    // Use the uploaded Supabase URL (not raw base64) so Puppeteer can fetch
+    // the signature image reliably when rendering the PDF.
     const pdfBuffer = await embedSignatureInPdf(contractData, {
-      sender: parsed.data.signature,
+      sender: signatureUrl,
       recipient: existing.otherPartySignature,
     });
 
