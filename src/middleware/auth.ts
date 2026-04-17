@@ -9,21 +9,13 @@ export async function authenticate(
   next: NextFunction
 ): Promise<void> {
   try {
-    if (process.env.NODE_ENV === 'development') {
-      req.user = {
-        id: 'dev-user-1',
-        email: 'dev@contractflow.local',
-      };
-      return next();
-    }
-
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       throw new UnauthorizedError('Missing or malformed Authorization header');
     }
 
-    const token = authHeader.slice(7);
+    const token = authHeader.slice(7); // strip "Bearer "
 
     const {
       data: { user },

@@ -371,10 +371,15 @@ export async function createSigningLink(
 
     const existing = await assertContractOwnership(contractId, userId);
 
-    if (
-      existing.status === ContractStatus.DRAFT ||
-      existing.status === ContractStatus.GENERATED
-    ) {
+    const sendableStatuses: ContractStatus[] = [
+      ContractStatus.SIGNED_BY_ME,
+      ContractStatus.SENT,
+      ContractStatus.VIEWED,
+    ];
+    if (!sendableStatuses.includes(existing.status)) {
+      if (existing.status === ContractStatus.COMPLETED || existing.status === ContractStatus.SIGNED_BY_OTHER) {
+        throw new AppError('This contract has already been signed by both parties', 400);
+      }
       throw new AppError('Sign the contract before sending it to the other party', 400);
     }
 

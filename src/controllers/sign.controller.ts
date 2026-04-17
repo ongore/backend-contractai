@@ -183,6 +183,10 @@ export async function submitSignature(
 
     const { signature } = parsed.data;
 
+    if (!contract.mySignature) {
+      throw new AppError('The contract sender has not yet signed. Both parties must sign.', 400);
+    }
+
     // Upload recipient signature to storage
     const { url: recipientSigUrl } = await uploadSignature(
       contract.userId,

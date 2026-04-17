@@ -7,7 +7,7 @@ import { supabaseAnon } from '../config/supabase';
 
 /**
  * POST /api/auth/send-otp
- * Sends a one-time code to the given email address using Supabase OTP.
+ * Sends a one-time email code to the given address via Supabase.
  */
 export async function sendOtp(
   req: Request,
@@ -15,27 +15,25 @@ export async function sendOtp(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { email } = req.body as { email?: string };
+    const { phone } = req.body as { phone?: string };
 
-    if (!email) {
-      sendApiError(res, 'Email is required', 400);
+    if (!phone) {
+      sendApiError(res, 'Phone number is required', 400);
       return;
     }
 
     const { error } = await supabaseAnon.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: true,
-      },
+      phone,
+      options: { shouldCreateUser: true },
     });
 
     if (error) {
-      logger.warn('Supabase send OTP failed', { email, error: error.message });
+      logger.warn('Supabase send OTP failed', { phone, error: error.message });
       sendApiError(res, error.message, 400);
       return;
     }
 
-    success(res, { message: 'OTP sent', email });
+    success(res, { message: 'OTP sent', phone });
   } catch (err) {
     next(err);
   }
@@ -43,7 +41,8 @@ export async function sendOtp(
 
 /**
  * POST /api/auth/verify-otp
- * Verifies an OTP and returns an auth session for the mobile client.
+ * Verifies an email OTP and returns an auth session.
+ * Includes isNewUser: true when this is the user's first successful verification.
  */
 export async function verifyOtp(
   req: Request,
@@ -51,51 +50,57 @@ export async function verifyOtp(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { email, otp } = req.body as { email?: string; otp?: string };
+    const { phone, token } = req.body as { phone?: string; token?: string };
 
-    if (!email || !otp) {
-      sendApiError(res, 'Email and OTP are required', 400);
+    if (!phone || !token) {
+      sendApiError(res, 'Phone number and token are required', 400);
       return;
     }
 
     const { data, error } = await supabaseAnon.auth.verifyOtp({
-      email,
-      token: otp,
-      type: 'email',
+      phone,
+      token,
+      type: 'sms',
     });
 
     if (error || !data.session || !data.user) {
-      const msg = error?.message ?? 'Invalid OTP';
-      logger.warn('Supabase verify OTP failed', { email, error: msg });
+      const msg = error?.message ?? 'Invalid or expired code';
+      logger.warn('Supabase verify OTP failed', { phone, error: msg });
       sendApiError(res, msg, 401);
       return;
     }
 
     const supaUser = data.user;
-    const session = data.session;
+    const session  = data.session;
 
-    // Ensure a corresponding DB user exists for app data ownership.
+    const existingUser = await prisma.user.findUnique({ where: { id: supaUser.id } });
+    const isNewUser    = existingUser === null;
+
     const user = await prisma.user.upsert({
       where: { id: supaUser.id },
       create: {
-        id: supaUser.id,
-        email: supaUser.email ?? email,
-        name: null,
+        id:    supaUser.id,
+        phone: supaUser.phone ?? phone,
+        email: supaUser.email ?? undefined,
+        name:  null,
       },
       update: {
-        email: supaUser.email ?? email,
+        phone: supaUser.phone ?? phone,
+        ...(supaUser.email ? { email: supaUser.email } : {}),
       },
     });
 
     success(res, {
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name ?? undefined,
+        id:        user.id,
+        email:     user.email ?? undefined,
+        phone:     user.phone ?? undefined,
+        name:      user.name ?? undefined,
         createdAt: user.createdAt.toISOString(),
       },
-      accessToken: session.access_token,
+      accessToken:  session.access_token,
       refreshToken: session.refresh_token,
+      isNewUser,
     });
   } catch (err) {
     next(err);
@@ -104,7 +109,6 @@ export async function verifyOtp(
 
 /**
  * POST /api/auth/sign-out
- * There is no server-side session to invalidate for JWT-based auth.
  */
 export async function signOut(
   _req: Request,
@@ -116,7 +120,6 @@ export async function signOut(
 
 /**
  * DELETE /api/auth/delete-account
- * Deletes the current user (cascades contracts via FK).
  */
 export async function deleteAccount(
   req: Request,
@@ -125,7 +128,6 @@ export async function deleteAccount(
 ): Promise<void> {
   try {
     const { id } = req.user;
-
     await prisma.user.delete({ where: { id } });
     noContent(res);
   } catch (err) {
@@ -135,10 +137,7 @@ export async function deleteAccount(
 
 /**
  * POST /api/auth/sync
- * Creates or updates the user record in the database using the
- * identity from the Supabase JWT (set by the auth middleware).
- *
- * Call this after a successful Supabase sign-in/sign-up from the mobile app.
+ * Creates or updates the user's profile (name etc.) after sign-in.
  */
 export async function syncUser(
   req: Request,
@@ -149,27 +148,20 @@ export async function syncUser(
     const { id, email } = req.user;
     const { name } = req.body as { name?: string };
 
-    logger.debug('Syncing user', { userId: id, email });
-
     const user = await prisma.user.upsert({
       where: { id },
-      create: {
-        id,
-        email,
-        name: name ?? null,
-      },
+      create: { id, email: email ?? undefined, name: name ?? null },
       update: {
-        email, // Keep email in sync in case it was updated in Supabase
-        ...(name !== undefined && { name }),
+        ...(email              ? { email }  : {}),
+        ...(name !== undefined ? { name }   : {}),
       },
     });
 
-    logger.info('User synced', { userId: user.id, email: user.email });
-
     success(res, {
-      id: user.id,
-      email: user.email,
-      name: user.name,
+      id:        user.id,
+      phone:     user.phone,
+      email:     user.email,
+      name:      user.name,
       createdAt: user.createdAt,
     });
   } catch (err) {
@@ -179,7 +171,6 @@ export async function syncUser(
 
 /**
  * GET /api/auth/me
- * Returns the current authenticated user's profile from the database.
  */
 export async function getMe(
   req: Request,
@@ -192,27 +183,25 @@ export async function getMe(
     const user = await prisma.user.findUnique({
       where: { id },
       select: {
-        id: true,
-        email: true,
-        name: true,
+        id:        true,
+        phone:     true,
+        email:     true,
+        name:      true,
         createdAt: true,
         updatedAt: true,
-        _count: {
-          select: { contracts: true },
-        },
+        _count: { select: { contracts: true } },
       },
     });
 
-    if (!user) {
-      throw new NotFoundError('User');
-    }
+    if (!user) throw new NotFoundError('User');
 
     success(res, {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      id:            user.id,
+      phone:         user.phone,
+      email:         user.email,
+      name:          user.name,
+      createdAt:     user.createdAt,
+      updatedAt:     user.updatedAt,
       contractCount: user._count.contracts,
     });
   } catch (err) {
