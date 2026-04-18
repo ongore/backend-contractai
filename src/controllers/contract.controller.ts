@@ -176,7 +176,8 @@ export async function extractFromInput(
       throw new ValidationError('A file upload is required when method is "image" or "pdf"');
     }
 
-    logger.info('Starting contract extraction', { userId, method });
+    logger.info('Starting contract extraction', { userId, method, textLength: text?.length });
+    console.log('[EXTRACT] text received:', JSON.stringify(text?.slice(0, 200)));
 
     const result = await extractContractFields({
       method: method as 'text' | 'image' | 'pdf',
@@ -184,6 +185,8 @@ export async function extractFromInput(
       imageBuffer: file?.buffer,
       mimeType: file?.mimetype,
     });
+
+    console.log('[EXTRACT] fields returned:', JSON.stringify(result.fields));
 
     // Ensure user exists in DB (auto-sync for first use)
     await prisma.user.upsert({

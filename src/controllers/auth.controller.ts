@@ -1,13 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../config/prisma';
+import { config } from '../config/env';
 import { noContent, success, error as sendApiError } from '../utils/response';
 import { NotFoundError } from '../utils/errors';
 import logger from '../utils/logger';
-import { supabaseAnon } from '../config/supabase';
+import { sendVerification, checkVerification } from '../services/sms/twilioService';
 
 /**
  * POST /api/auth/send-otp
- * Sends a one-time email code to the given address via Supabase.
+ * Sends a one-time SMS code via Twilio Verify.
  */
 export async function sendOtp(
   req: Request,
@@ -22,26 +24,17 @@ export async function sendOtp(
       return;
     }
 
-    const { error } = await supabaseAnon.auth.signInWithOtp({
-      phone,
-      options: { shouldCreateUser: true },
-    });
-
-    if (error) {
-      logger.warn('Supabase send OTP failed', { phone, error: error.message });
-      sendApiError(res, error.message, 400);
-      return;
-    }
-
+    await sendVerification(phone);
     success(res, { message: 'OTP sent', phone });
-  } catch (err) {
+  } catch (err: any) {
+    logger.warn('Twilio send OTP failed', { error: err?.message });
     next(err);
   }
 }
 
 /**
  * POST /api/auth/verify-otp
- * Verifies an email OTP and returns an auth session.
+ * Verifies an SMS OTP via Twilio, then issues a signed JWT.
  * Includes isNewUser: true when this is the user's first successful verification.
  */
 export async function verifyOtp(
@@ -57,38 +50,26 @@ export async function verifyOtp(
       return;
     }
 
-    const { data, error } = await supabaseAnon.auth.verifyOtp({
-      phone,
-      token,
-      type: 'sms',
-    });
-
-    if (error || !data.session || !data.user) {
-      const msg = error?.message ?? 'Invalid or expired code';
-      logger.warn('Supabase verify OTP failed', { phone, error: msg });
-      sendApiError(res, msg, 401);
+    const approved = await checkVerification(phone, token);
+    if (!approved) {
+      logger.warn('Twilio verify OTP rejected', { phone });
+      sendApiError(res, 'Invalid or expired code', 401);
       return;
     }
 
-    const supaUser = data.user;
-    const session  = data.session;
-
-    const existingUser = await prisma.user.findUnique({ where: { id: supaUser.id } });
-    const isNewUser    = existingUser === null;
-
     const user = await prisma.user.upsert({
-      where: { id: supaUser.id },
-      create: {
-        id:    supaUser.id,
-        phone: supaUser.phone ?? phone,
-        email: supaUser.email ?? undefined,
-        name:  null,
-      },
-      update: {
-        phone: supaUser.phone ?? phone,
-        ...(supaUser.email ? { email: supaUser.email } : {}),
-      },
+      where: { phone },
+      create: { phone, name: null },
+      update: {},
     });
+
+    const isNewUser = !user.name;
+
+    const accessToken = jwt.sign(
+      { sub: user.id, phone: user.phone },
+      config.jwt.secret,
+      { expiresIn: '90d' },
+    );
 
     success(res, {
       user: {
@@ -98,8 +79,8 @@ export async function verifyOtp(
         name:      user.name ?? undefined,
         createdAt: user.createdAt.toISOString(),
       },
-      accessToken:  session.access_token,
-      refreshToken: session.refresh_token,
+      accessToken,
+      refreshToken: null,
       isNewUser,
     });
   } catch (err) {
@@ -145,15 +126,15 @@ export async function syncUser(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { id, email } = req.user;
-    const { name } = req.body as { name?: string };
+    const { id } = req.user;
+    const { name, email } = req.body as { name?: string; email?: string };
 
     const user = await prisma.user.upsert({
       where: { id },
       create: { id, email: email ?? undefined, name: name ?? null },
       update: {
-        ...(email              ? { email }  : {}),
-        ...(name !== undefined ? { name }   : {}),
+        ...(email !== undefined ? { email } : {}),
+        ...(name  !== undefined ? { name }  : {}),
       },
     });
 

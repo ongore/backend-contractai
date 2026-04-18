@@ -50,6 +50,12 @@ export const config = {
   limits: {
     freeContractLimit: parseInt(optionalEnv('FREE_CONTRACT_LIMIT', '1'), 10),
   },
+
+  twilio: {
+    accountSid:      requireEnv('TWILIO_ACCOUNT_SID'),
+    authToken:       requireEnv('TWILIO_AUTH_TOKEN'),
+    verifyServiceSid: requireEnv('TWILIO_VERIFY_SERVICE_SID'),
+  },
 } as const;
 
 // Validate all required vars immediately on import
