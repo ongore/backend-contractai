@@ -115,8 +115,8 @@ function mapRawToFields(raw: RawExtraction): ExtractedField[] {
 
   for (const def of fieldDefinitions) {
     const rawValue = raw[def.key];
-    const value =
-      rawValue != null && rawValue !== '' ? String(rawValue) : '';
+    const strValue = rawValue != null ? String(rawValue) : '';
+    const value = strValue !== '' && strValue !== 'null' ? strValue : '';
 
     // Always include required fields; only include optional fields if they have a value
     if (def.required || value) {

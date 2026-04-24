@@ -189,11 +189,23 @@ export async function extractFromInput(
     console.log('[EXTRACT] fields returned:', JSON.stringify(result.fields));
 
     // Ensure user exists in DB (auto-sync for first use)
-    await prisma.user.upsert({
+    const user = await prisma.user.upsert({
       where: { id: userId },
       create: { id: userId, email: req.user.email },
       update: {},
     });
+
+    // Enforce per-user contract limit (free plan gate)
+    const contractCount = await prisma.contract.count({ where: { userId } });
+    if (user.plan === 'free' && contractCount >= user.contractLimit) {
+      res.status(403).json({
+        error: 'CONTRACT_LIMIT_REACHED',
+        message: 'Upgrade to Pro for unlimited contracts.',
+        limit: user.contractLimit,
+        current: contractCount,
+      });
+      return;
+    }
 
     // Create contract record with extracted fields
     const contract = await prisma.contract.create({
